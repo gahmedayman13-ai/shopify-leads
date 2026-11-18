@@ -1,32 +1,52 @@
 import requests, re, csv, time, json
 
-NICHE = "skincare"
 TARGET = 1000
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
+def parse_surt(surt):
+    # com,myshopify,xxx)/ -> xxx.myshopify.com
+    try:
+        host_part = surt.split(")")[0]
+        parts = host_part.split(",")
+        parts.reverse()
+        host = ".".join(parts)
+        if ".myshopify.com" in host:
+            return "https://" + host
+    except:
+        pass
+    return None
+
 def get_domains():
     domains = set()
-    # بنجيب من أرشيف Common Crawl - مش محظور من جيت هب
-    indexes = ["CC-MAIN-2025-30", "CC-MAIN-2025-21", "CC-MAIN-2025-13"]
+    indexes = ["CC-MAIN-2025-30", "CC-MAIN-2025-21", "CC-MAIN-2025-13", "CC-MAIN-2025-08"]
     for idx in indexes:
-        url = f"https://index.commoncrawl.org/{idx}-index?url=*.myshopify.com&output=json&limit=20000&filter=status:200"
-        try:
-            print(f"Trying {idx}...")
-            r = requests.get(url, headers=HEADERS, timeout=60)
-            for line in r.text.splitlines():
-                try:
-                    j = json.loads(line)
-                    host = j.get("url", "").split("/")[2] if "://" in j.get("url","") else j.get("url","").split("/")[0]
-                    if ".myshopify.com" in host:
-                        domains.add("https://" + host)
-                except:
-                    pass
-            print(f"{idx} -> total {len(domains)}")
-            if len(domains) >= TARGET:
+        for page in range(0, 20):
+            url = f"https://index.commoncrawl.org/{idx}-index?url=*.myshopify.com/*&output=json&filter=status:200&collapse=urlkey&limit=10000&page={page}"
+            try:
+                r = requests.get(url, headers=HEADERS, timeout=60)
+                if not r.text.strip():
+                    break
+                for line in r.text.splitlines():
+                    try:
+                        j = json.loads(line)
+                        surt = j.get("url", "")
+                        d = parse_surt(surt)
+                        if d:
+                            domains.add(d)
+                        # لو رجع url عادي مش surt
+                        elif ".myshopify.com" in surt:
+                            m = re.search(r'([a-z0-9\-]+\.myshopify\.com)', surt)
+                            if m:
+                                domains.add("https://" + m.group(1))
+                    except:
+                        pass
+                print(f"{idx} page {page} -> total {len(domains)}")
+                if len(domains) >= TARGET:
+                    return list(domains)[:TARGET]
+                time.sleep(1)
+            except Exception as e:
+                print(e)
                 break
-            time.sleep(2)
-        except Exception as e:
-            print(e)
     return list(domains)[:TARGET]
 
 def find_email(domain):
